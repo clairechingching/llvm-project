@@ -529,9 +529,9 @@ SDValue BPFTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   } else if (ExternalSymbolSDNode *E = dyn_cast<ExternalSymbolSDNode>(Callee)) {
     if (StringRef(E->getSymbol()) != BPF_TRAP) {
       Callee = DAG.getTargetExternalSymbol(E->getSymbol(), PtrVT, 0);
-      fail(CLI.DL, DAG,
-           Twine("A call to built-in function '" + StringRef(E->getSymbol()) +
-                 "' is not supported."));
+      // fail(CLI.DL, DAG,
+      //      Twine("A call to built-in function '" + StringRef(E->getSymbol()) +
+      //            "' is not supported."));
     }
   }
 
@@ -1068,4 +1068,14 @@ bool BPFTargetLowering::isLegalAddressingMode(const DataLayout &DL,
   }
 
   return true;
+}
+
+bool BPFTargetLowering::CanLowerReturn(
+    CallingConv::ID CallConv, MachineFunction &MF, bool IsVarArg,
+    const SmallVectorImpl<ISD::OutputArg> &Outs, LLVMContext &Context,
+    const Type *RetTy) const {
+  // At minimal return Outs.size() <= 1, or check valid types in CC.
+  SmallVector<CCValAssign, 16> RVLocs;
+  CCState CCInfo(CallConv, IsVarArg, MF, RVLocs, Context);
+  return CCInfo.CheckReturn(Outs, getHasAlu32() ? RetCC_BPF32 : RetCC_BPF64);
 }
