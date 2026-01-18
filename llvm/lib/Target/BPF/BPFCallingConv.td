@@ -12,9 +12,9 @@
 
 // BPF 64-bit C return-value convention.
 def RetCC_BPF64 : CallingConv<[
-  CCIfType<[i64], CCAssignToReg<[R0]>>,
+  CCIfType<[i64], CCAssignToReg<[R0, R1]>>,
   // Split i128 return into R0 and R1
-  CCIfType<[i128], CCAssignToReg<[R0, R1]>>
+  // CCIfType<[i128], CCAssignToReg<[R0, R1]>>
 ]>;
 
 // BPF 64-bit C Calling convention.

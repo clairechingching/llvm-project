@@ -639,12 +639,14 @@ SDValue BPFTargetLowering::LowerCallResult(
   SmallVector<CCValAssign, 16> RVLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, RVLocs, *DAG.getContext());
 
-  if (Ins.size() > 1) {
-    fail(DL, DAG, "only small returns supported");
-    for (auto &In : Ins)
-      InVals.push_back(DAG.getConstant(0, DL, In.VT));
-    return DAG.getCopyFromReg(Chain, DL, 1, Ins[0].VT, InGlue).getValue(1);
-  }
+  /// NOTES, comment this out to support splitting i128 return to R0/R1
+  ///
+  // if (Ins.size() > 1) {
+  //   fail(DL, DAG, "only small returns supported");
+  //   for (auto &In : Ins)
+  //     InVals.push_back(DAG.getConstant(0, DL, In.VT));
+  //   return DAG.getCopyFromReg(Chain, DL, 1, Ins[0].VT, InGlue).getValue(1);
+  // }
 
   CCInfo.AnalyzeCallResult(Ins, getHasAlu32() ? RetCC_BPF32 : RetCC_BPF64);
 
@@ -1074,7 +1076,6 @@ bool BPFTargetLowering::CanLowerReturn(
     CallingConv::ID CallConv, MachineFunction &MF, bool IsVarArg,
     const SmallVectorImpl<ISD::OutputArg> &Outs, LLVMContext &Context,
     const Type *RetTy) const {
-  // At minimal return Outs.size() <= 1, or check valid types in CC.
   SmallVector<CCValAssign, 16> RVLocs;
   CCState CCInfo(CallConv, IsVarArg, MF, RVLocs, Context);
   return CCInfo.CheckReturn(Outs, getHasAlu32() ? RetCC_BPF32 : RetCC_BPF64);
