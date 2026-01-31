@@ -66,7 +66,6 @@ void BPFSubtarget::initializeEnvironment() {
   HasGotol = false;
   HasStoreImm = false;
   HasLoadAcqStoreRel = false;
-  HasGotox = false;
   AllowsMisalignedMemAccess = true;
 }
 
