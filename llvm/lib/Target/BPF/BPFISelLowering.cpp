@@ -549,9 +549,9 @@ SDValue BPFTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   } else if (ExternalSymbolSDNode *E = dyn_cast<ExternalSymbolSDNode>(Callee)) {
     if (StringRef(E->getSymbol()) != BPF_TRAP) {
       Callee = DAG.getTargetExternalSymbol(E->getSymbol(), PtrVT, 0);
-      fail(CLI.DL, DAG,
-           Twine("A call to built-in function '" + StringRef(E->getSymbol()) +
-                 "' is not supported."));
+      // fail(CLI.DL, DAG,
+      //      Twine("A call to built-in function '" + StringRef(E->getSymbol()) +
+      //            "' is not supported."));
     }
   }
 
