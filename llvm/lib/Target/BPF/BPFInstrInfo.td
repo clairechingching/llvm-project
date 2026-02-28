@@ -852,6 +852,20 @@ let usesCustomInserter = 1, isCodeGenOnly = 1 in {
 def : Pat<(BPFWrapper tglobaladdr:$in), (LD_imm64 tglobaladdr:$in)>;
 def : Pat<(BPFWrapper tconstpool:$in), (LD_imm64 tconstpool:$in)>;
 
+// Fold bit-test branches into JSET/JSET32.
+def : Pat<(BPFbrcc (and (i64 GPR:$dst), (i64 GPR:$src)),
+                  (i64 0), BPF_CC_NE, bb:$BrDst),
+          (JSET_rr GPR:$dst, GPR:$src, bb:$BrDst)>;
+def : Pat<(BPFbrcc (and (i64 GPR:$dst), i64immSExt32:$imm),
+                  (i64 0), BPF_CC_NE, bb:$BrDst),
+          (JSET_ri GPR:$dst, i64immSExt32:$imm, bb:$BrDst)>;
+def : Pat<(BPFbrcc (and (i32 GPR32:$dst), (i32 GPR32:$src)),
+                  (i32 0), BPF_CC_NE_32, bb:$BrDst),
+          (JSET_rr_32 GPR32:$dst, GPR32:$src, bb:$BrDst)>;
+def : Pat<(BPFbrcc (and (i32 GPR32:$dst), i32immSExt32:$imm),
+                  (i32 0), BPF_CC_NE_32, bb:$BrDst),
+          (JSET_ri_32 GPR32:$dst, i32immSExt32:$imm, bb:$BrDst)>;
+
 // 0xffffFFFF doesn't fit into simm32, optimize common case
 def : Pat<(i64 (and (i64 GPR:$src), 0xffffFFFF)),
           (SRL_ri (SLL_ri (i64 GPR:$src), 32), 32)>;

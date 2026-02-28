@@ -317,6 +317,7 @@ private:
 
   bool in16BitRange(int Num);
   bool eliminateRedundantMov();
+  bool foldBitTestBranchIntoJSet();
   bool adjustBranch();
   bool insertMissingCallerSavedSpills();
   bool removeMayGotoZero();
@@ -333,6 +334,7 @@ public:
 
     bool Changed;
     Changed = eliminateRedundantMov();
+    Changed |= foldBitTestBranchIntoJSet();
     if (SupportGotol)
       Changed = adjustBranch() || Changed;
     Changed |= insertMissingCallerSavedSpills();
@@ -390,6 +392,89 @@ bool BPFMIPreEmitPeephole::eliminateRedundantMov() {
   }
 
   return Eliminated;
+}
+
+bool BPFMIPreEmitPeephole::foldBitTestBranchIntoJSet() {
+  bool Changed = false;
+
+  for (MachineBasicBlock &MBB : *MF) {
+    auto getPrevNonDebugInstr = [&](MachineInstr &MI) -> MachineInstr * {
+      auto It = MI.getIterator();
+      while (It != MBB.begin()) {
+        --It;
+        if (!It->isDebugInstr())
+          return &*It;
+      }
+      return nullptr;
+    };
+
+    for (auto MII = MBB.begin(), MIE = MBB.end(); MII != MIE;) {
+      MachineInstr &BrMI = *MII++;
+
+      unsigned JSetRROpc = 0;
+      unsigned JSetRIOpc = 0;
+      switch (BrMI.getOpcode()) {
+      case BPF::JNE_ri:
+        JSetRROpc = BPF::JSET_rr;
+        JSetRIOpc = BPF::JSET_ri;
+        break;
+      case BPF::JNE_ri_32:
+        JSetRROpc = BPF::JSET_rr_32;
+        JSetRIOpc = BPF::JSET_ri_32;
+        break;
+      default:
+        continue;
+      }
+
+      // Match:
+      //   and dst, src|imm
+      //   if dst != 0 goto target
+      //
+      // Fold to:
+      //   if dst & src|imm goto target
+      if (!BrMI.getOperand(1).isImm() || BrMI.getOperand(1).getImm() != 0 ||
+          !BrMI.getOperand(0).isReg())
+        continue;
+
+      Register DstReg = BrMI.getOperand(0).getReg();
+      if (!DstReg.isPhysical() || isPhysRegUsedAfter(DstReg, BrMI.getIterator()))
+        continue;
+
+      MachineInstr *AndMI = getPrevNonDebugInstr(BrMI);
+      if (!AndMI || AndMI->getParent() != &MBB || !AndMI->getOperand(0).isReg() ||
+          !AndMI->getOperand(1).isReg())
+        continue;
+      if (AndMI->getOperand(0).getReg() != DstReg ||
+          AndMI->getOperand(1).getReg() != DstReg)
+        continue;
+
+      MachineBasicBlock *TargetBB = BrMI.getOperand(2).getMBB();
+      switch (AndMI->getOpcode()) {
+      case BPF::AND_rr:
+      case BPF::AND_rr_32:
+        BuildMI(MBB, BrMI, BrMI.getDebugLoc(), TII->get(JSetRROpc))
+            .addReg(DstReg)
+            .addReg(AndMI->getOperand(2).getReg())
+            .addMBB(TargetBB);
+        break;
+      case BPF::AND_ri:
+      case BPF::AND_ri_32:
+        BuildMI(MBB, BrMI, BrMI.getDebugLoc(), TII->get(JSetRIOpc))
+            .addReg(DstReg)
+            .addImm(AndMI->getOperand(2).getImm())
+            .addMBB(TargetBB);
+        break;
+      default:
+        continue;
+      }
+
+      BrMI.eraseFromParent();
+      AndMI->eraseFromParent();
+      Changed = true;
+    }
+  }
+
+  return Changed;
 }
 
 bool BPFMIPreEmitPeephole::in16BitRange(int Num) {
