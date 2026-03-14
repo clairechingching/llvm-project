@@ -378,7 +378,10 @@ SDValue BPFTargetLowering::LowerFormalArguments(
   CCState CCInfo(CallConv, IsVarArg, MF, ArgLocs, *DAG.getContext());
   CCInfo.AnalyzeFormalArguments(Ins, getHasAlu32() ? CC_BPF32 : CC_BPF64);
 
-  bool HasMemArgs = false;
+  // bool HasMemArgs = false;
+  int64_t StackArgSize = CCInfo.getStackSize();
+  MVT PtrVT = getPointerTy(MF.getDataLayout());
+
   for (size_t I = 0; I < ArgLocs.size(); ++I) {
     auto &VA = ArgLocs[I];
 
@@ -418,16 +421,40 @@ SDValue BPFTargetLowering::LowerFormalArguments(
 
         break;
       }
-    } else {
-      if (VA.isMemLoc())
-        HasMemArgs = true;
-      else
-        report_fatal_error("unhandled argument location");
-      InVals.push_back(DAG.getConstant(0, DL, VA.getLocVT()));
-    }
+    // } else {
+    //   if (VA.isMemLoc())
+    //     HasMemArgs = true;
+    //   else
+    //     report_fatal_error("unhandled argument location");
+    //   InVals.push_back(DAG.getConstant(0, DL, VA.getLocVT()));
+    } else if (VA.isMemLoc()) {
+      EVT MemVT = VA.getLocVT();
+      unsigned ArgSize = MemVT.getStoreSize();
+      int64_t Offset = -StackArgSize + VA.getLocMemOffset();
+      MachineFrameInfo &MFI = MF.getFrameInfo();
+      int FI = MFI.CreateFixedObject(ArgSize, Offset, /*IsImmutable=*/true);
+      SDValue FIN = DAG.getFrameIndex(FI, PtrVT);
+      SDValue Load =
+          DAG.getLoad(MemVT, DL, Chain, FIN,
+                      MachinePointerInfo::getFixedStack(MF, FI));
+      Chain = Load.getValue(1);
+      SDValue ArgValue = Load;
+      if (VA.getLocInfo() == CCValAssign::SExt)
+        ArgValue = DAG.getNode(ISD::AssertSext, DL, MemVT, ArgValue,
+                               DAG.getValueType(VA.getValVT()));
+      else if (VA.getLocInfo() == CCValAssign::ZExt)
+        ArgValue = DAG.getNode(ISD::AssertZext, DL, MemVT, ArgValue,
+                               DAG.getValueType(VA.getValVT()));
+      if (VA.getLocInfo() != CCValAssign::Full)
+        ArgValue = DAG.getNode(ISD::TRUNCATE, DL, VA.getValVT(), ArgValue);
+
+      InVals.push_back(ArgValue);	
+	} else {
+	  report_fatal_error("unhandled argument location");
+	}
   }
-  if (HasMemArgs)
-    fail(DL, DAG, "stack arguments are not supported");
+  // if (HasMemArgs)
+  //   fail(DL, DAG, "stack arguments are not supported");
   if (IsVarArg)
     fail(DL, DAG, "variadic functions are not supported");
   if (MF.getFunction().hasStructRetAttr())
@@ -485,8 +512,8 @@ SDValue BPFTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 
   unsigned NumBytes = CCInfo.getStackSize();
 
-  if (Outs.size() > MaxArgs)
-    fail(CLI.DL, DAG, "too many arguments", Callee);
+  // if (Outs.size() > MaxArgs)
+  //   fail(CLI.DL, DAG, "too many arguments", Callee);
 
   for (auto &Arg : Outs) {
     ISD::ArgFlagsTy Flags = Arg.Flags;
@@ -500,9 +527,13 @@ SDValue BPFTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   Chain = DAG.getCALLSEQ_START(Chain, NumBytes, 0, CLI.DL);
 
   SmallVector<std::pair<unsigned, SDValue>, MaxArgs> RegsToPass;
+  SmallVector<SDValue, 8> MemOpChains;
+  MachineFrameInfo &MFI = MF.getFrameInfo();
+  int64_t StackArgSize = NumBytes;
 
   // Walk arg assignments
-  for (size_t i = 0; i < std::min(ArgLocs.size(), MaxArgs); ++i) {
+  // for (size_t i = 0; i < std::min(ArgLocs.size(), MaxArgs); ++i) {
+  for (size_t i = 0; i < ArgLocs.size(); ++i) {
     CCValAssign &VA = ArgLocs[i];
     SDValue &Arg = OutVals[i];
 
@@ -524,12 +555,27 @@ SDValue BPFTargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     }
 
     // Push arguments into RegsToPass vector
-    if (VA.isRegLoc())
+    if (VA.isRegLoc()) {
       RegsToPass.push_back(std::make_pair(VA.getLocReg(), Arg));
-    else
-      report_fatal_error("stack arguments are not supported");
+	  continue;
+	}
+    // else
+    //   report_fatal_error("stack arguments are not supported");
+    EVT MemVT = VA.getLocVT();
+    unsigned ArgSize = MemVT.getStoreSize();
+    int64_t Offset = -StackArgSize + VA.getLocMemOffset();
+    int FI = MFI.CreateFixedObject(ArgSize, Offset, /*IsImmutable=*/false);
+    SDValue FIN = DAG.getFrameIndex(FI, PtrVT);
+    MemOpChains.push_back(DAG.getStore(Chain 	//
+									, CLI.DL 	//
+									, Arg 		//
+									, FIN 		//
+									, MachinePointerInfo::getFixedStack(MF, FI)));
   }
 
+  if (!MemOpChains.empty())
+    Chain = DAG.getNode(ISD::TokenFactor, CLI.DL, MVT::Other, MemOpChains);
+  
   SDValue InGlue;
 
   // Build a sequence of copy-to-reg nodes chained together with token chain and
